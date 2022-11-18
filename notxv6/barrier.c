@@ -37,7 +37,10 @@ barrier()
   if(bstate.nthread == nthread){
     // 所有线程到达屏障
     bstate.round++;
-    bstate.nthread = 0;
+    bstate.nthread = 0;  
+    // 以上这两个变量更新需要放在前，避免某些thread太快进入下一轮时
+    // 这里两个变量还没修改，触发assert
+    // 或者错误地更新bstate.nthread，最终导致所有线程永远无法继续执行
     pthread_cond_broadcast(&bstate.barrier_cond);
   }else{
     // 还有线程没到，当前线程锁，阻塞
