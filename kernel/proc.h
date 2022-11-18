@@ -1,7 +1,7 @@
 // Saved registers for kernel context switches.
 struct context {
-  uint64 ra;
-  uint64 sp;
+  uint64 ra;  // return address
+  uint64 sp;  // stack pointer
 
   // callee-saved
   uint64 s0;
