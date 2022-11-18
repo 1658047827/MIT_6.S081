@@ -225,7 +225,7 @@ $U/_uthread: $U/uthread.o $U/uthread_switch.o $(ULIB)
 	$(OBJDUMP) -S $U/_uthread > $U/uthread.asm
 
 ph: notxv6/ph.c
-	gcc -o ph -g -O2 $(XCFLAGS) notxv6/ph.c -pthread
+	gcc -o ph -std=c99 -g -O2 $(XCFLAGS) notxv6/ph.c -pthread
 
 barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
