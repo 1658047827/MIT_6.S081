@@ -1,0 +1,8 @@
+两个线程时，会由于insert()并发而出错。假设现在有两线程T0和T1，当T0和T1当前要插入的key%NBUCKET相等，二者将会选择同一个bucket。
+二者同时调用insert()函数后，例如：
+    T0                      T1
+e->next = n;            
+                        e->next = n;
+*p = e;                 
+                        *p = e;
+这样的序列就会导致T0的e插入失效，从而出现missing。而单线程的不会出现上述情况，所以不会有missing。
