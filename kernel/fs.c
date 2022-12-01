@@ -62,6 +62,7 @@ bzero(int dev, int bno)
 
 // Allocate a zeroed disk block.
 // returns 0 if out of disk space.
+// return absolute block number on success
 static uint
 balloc(uint dev)
 {
@@ -75,9 +76,9 @@ balloc(uint dev)
       m = 1 << (bi % 8);
       if((bp->data[bi/8] & m) == 0){  // Is block free?
         bp->data[bi/8] |= m;  // Mark block in use.
-        log_write(bp);
+        log_write(bp);  // write back bitmap
         brelse(bp);
-        bzero(dev, b + bi);
+        bzero(dev, b + bi);  // zero newly allocated block
         return b + bi;
       }
     }
@@ -385,16 +386,17 @@ bmap(struct inode *ip, uint bn)
   uint addr, *a;
   struct buf *bp;
 
-  if(bn < NDIRECT){
+  if(bn < NDIRECT){  // logic block num < 11
     if((addr = ip->addrs[bn]) == 0){
       addr = balloc(ip->dev);
       if(addr == 0)
         return 0;
       ip->addrs[bn] = addr;
     }
-    return addr;
+    return addr;  // addr is a absolute block number
   }
-  bn -= NDIRECT;
+
+  bn -= NDIRECT;  // attention: bn decreases
 
   if(bn < NINDIRECT){
     // Load indirect block, allocating if necessary.
@@ -402,14 +404,49 @@ bmap(struct inode *ip, uint bn)
       addr = balloc(ip->dev);
       if(addr == 0)
         return 0;
-      ip->addrs[NDIRECT] = addr;
+      ip->addrs[NDIRECT] = addr;  // absolute #addr is 1st level of indirect table
     }
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
+    bp = bread(ip->dev, addr);  
+    a = (uint*)bp->data;  // get indirect table block
     if((addr = a[bn]) == 0){
       addr = balloc(ip->dev);
       if(addr){
         a[bn] = addr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+    return addr;
+  }
+  
+  bn -= NINDIRECT;  // attention: bn decreases
+
+  if(bn < NINDIRECT*NINDIRECT){
+    // load first level of indirect table, allocating if necessary.
+    if((addr = ip->addrs[NDIRECT + 1]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0)
+        return 0;
+      ip->addrs[NDIRECT + 1] = addr;
+    }
+    bp = bread(ip->dev, addr);  
+    a = (uint*)bp->data;  // get 1st level of indirect table block
+    if((addr = a[bn/NINDIRECT]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0){  // if out of disk space
+        brelse(bp);
+        return 0;
+      } 
+      a[bn/NINDIRECT] = addr;
+      log_write(bp);
+    }
+    brelse(bp);
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;  // get 2nd level of indirect table block
+    if((addr = a[bn%NINDIRECT]) == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a[bn%NINDIRECT] = addr;
         log_write(bp);
       }
     }
@@ -425,18 +462,20 @@ bmap(struct inode *ip, uint bn)
 void
 itrunc(struct inode *ip)
 {
-  int i, j;
+  int i, j, k;
   struct buf *bp;
+  struct buf *bp2;
   uint *a;
+  uint *a2;
 
-  for(i = 0; i < NDIRECT; i++){
+  for(i = 0; i < NDIRECT; i++){  // direct block
     if(ip->addrs[i]){
       bfree(ip->dev, ip->addrs[i]);
       ip->addrs[i] = 0;
     }
   }
 
-  if(ip->addrs[NDIRECT]){
+  if(ip->addrs[NDIRECT]){  // indirect block
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
     for(j = 0; j < NINDIRECT; j++){
@@ -446,6 +485,28 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  if(ip->addrs[NDIRECT+1]){  // doubly-indirect blocks
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    for(j = 0; j < NINDIRECT; j++){
+
+      if(a[j]){
+        bp2 = bread(ip->dev, a[j]);
+        a2 = (uint*)bp2->data;
+        for(k=0;k<NINDIRECT;++k){
+          if(a2[k])
+            bfree(ip->dev, a2[k]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, a[j]);
+        a[j] = 0;
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
   }
 
   ip->size = 0;
