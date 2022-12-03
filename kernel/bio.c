@@ -23,15 +23,15 @@
 #include "fs.h"
 #include "buf.h"
 
-struct {
-  struct spinlock lock;  // needed when iterate through head->...
+struct {  // buffer cache
+  struct spinlock lock;  // needed when iterate through head->... or manipulate head
   struct buf buf[NBUF];
 
   // Linked list of all buffers, through prev/next.
   // Sorted by how recently the buffer was used.
   // head.next is most recent, head.prev is least.
   struct buf head;
-} bcache;
+} bcache;  
 
 void
 binit(void)
@@ -60,7 +60,8 @@ bget(uint dev, uint blockno)
 {
   struct buf *b;
 
-  acquire(&bcache.lock);
+  // we shouldn't manipulate buffer cache until acquired bcache lock
+  acquire(&bcache.lock);  
 
   // Is the block already cached?
   for(b = bcache.head.next; b != &bcache.head; b = b->next){
@@ -94,7 +95,7 @@ bread(uint dev, uint blockno)
 {
   struct buf *b;
 
-  b = bget(dev, blockno);  // try to get buffer
+  b = bget(dev, blockno);  // try to get a locked buffer
   if(!b->valid) {
     virtio_disk_rw(b, 0);
     b->valid = 1;
@@ -106,7 +107,7 @@ bread(uint dev, uint blockno)
 void
 bwrite(struct buf *b)
 {
-  if(!holdingsleep(&b->lock))
+  if(!holdingsleep(&b->lock))  // check if the sleeplock is held
     panic("bwrite");
   virtio_disk_rw(b, 1);
 }

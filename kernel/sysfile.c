@@ -341,6 +341,34 @@ sys_open(void)
     return -1;
   }
 
+  // now handle the symlink situation
+  if(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
+    // if symlink points to another symlink, recursively follow
+    for(int i = 0;i< 10;++i){
+      // read the actual path
+      if(readi(ip, 0, (uint64)path, 0, MAXPATH) != MAXPATH) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      iunlockput(ip);
+      ip = namei(path);
+      if(ip == 0) {
+        end_op();
+        return -1;
+      }
+      ilock(ip);
+      if(ip->type != T_SYMLINK)
+        break;
+    }
+    // error: symlink beyond max depth
+    if(ip->type == T_SYMLINK) {
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }
+
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
       fileclose(f);
@@ -501,5 +529,35 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64
+sys_symlink(void){
+  char target[MAXPATH];
+  char path[MAXPATH];
+  struct inode *ip;
+
+  // get args
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0){
+    return -1;
+  }
+  
+  begin_op();
+  // create a locked inode
+  if((ip = create(path, T_SYMLINK, 0, 0)) == 0){
+    end_op();
+    return -1;
+  }
+
+  // write target to inode
+  if(writei(ip, 0, (uint64)target, 0, MAXPATH) < MAXPATH){
+    iunlockput(ip);
+    end_op();
+    return -1;
+  }
+
+  iunlockput(ip);
+  end_op();
   return 0;
 }
